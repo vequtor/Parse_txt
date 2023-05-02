@@ -7,225 +7,242 @@ Created on Thu Apr 20 12:00:02 2023
 
 
 import os, sys
-import pandas as pd
+import io
+import csv
 import numpy as np
 import argparse
-from typing import NamedTuple
 
-class Channels(NamedTuple):
-    start_channels: int
-    start_time: int
-    num_of_channels: int
-    space: int
-    period: int
-    
 
-# function for checking and
-# skipping lines
-def collect_data_channel(index):
-    start = 69 # ?????????????????
-    channel_row = 0  # ?????????????????
-    
-    if(index<start):
-        return True
-    
-    if(index%10==channel_row):
-        return False
 
-    return True
+def get_header_and_data_position(path: str) -> (list, io.TextIOWrapper):
+    with open(path, mode='r') as f:
+        header = []
+        for i in range(100):
+            line = f.readline()
+            if(not line):
+                return None
+            
+            if(line.strip()):
+                header.append(line.rstrip())
+            else:
+                j = 1
+                while(1):
+                    line = f.readline()
+                    if(not line):
+                        return None
+                    
+                    if(not line.strip()):
+                        j += 1
+                    else:
+                        if(j>=2):
+                            f.seek(f.tell()-len(line)-1)
+                            return header, f.tell()
+                        else:
+                            header.append(line.rstrip())
+                            break
+                    
+        return None
 
-# function for checking and
-# skipping lines
-def collect_data_time(index):
-    start = 69 # ?????????????????
-    time_row = 9  # ?????????????????
-    
-    if(index<start):
-        return True
-    
-    if(index%10==time_row):
-        return False
-    
-    return True
 
-def find_data_wavelength(path: str) -> np.array:
-    
+def find_data_wavelength(strings: list[str]) -> np.array:
     delta_sub = "Wavelength Delta (nm): "
     start_sub = "Wavelength Start (nm): "
     num_of_points_sub = "Number of Points: "
     
-    
-    info_about_channels_value = None
-    delta_value = None
     start_value = None
-    stop_value = None
+    delta_value = None
     num_of_points_value = None
     
-    counter_new_line = 0
-    
-    i = 0
-    
-    with open(path, mode='r') as fr:
-        while(1):
-            if(i>100):
-                print("Не найдено данных для построения диапазона длин волн.")
-                return
-                
-            if(delta_value and start_value and num_of_points_value and
-               info_about_channels):
-                stop_value = start_value + delta_value*num_of_points_value
-                print(f"\tДлина волны от {start_value} до {stop_value} " \
-                      f"{num_of_points_value} значений\n")
-                return np.arange(start_value, stop_value, delta_value)
-            
-            i += 1
-                
-            line = fr.readline()
-            
-            if(line=="\n"):
-                counter_new_line += 1
-            
-            # find first spectr
-            else:
-                if(num_of_points_value and counter_new_line>=1):
-                    print("sfasa")           
-                else:   
-                    counter_new_line = 0
-                
-            index_start = line.find(start_sub)
-            index_delta = line.find(delta_sub)
-            index_num_of_points = line.find(num_of_points_sub)
-                        
-            
-            if(index_delta != -1):
-                index_of_point = None
-                delta_str = line[index_delta+len(start_sub):-1]
-                delta_value = 0
-                
-                for index, sim in enumerate(delta_str):
-                    if(ord(sim)>=48 and ord(sim)<=57):
-                        if(index_of_point):
-                            delta_value += (ord(sim)-48)*(0.1**(index-index_of_point))
-                        else:
-                            delta_value = delta_value*10 + ord(sim)-48
-                
-                    if(ord(sim)==46):
-                        index_of_point = index
-            
-            if(index_start != -1):
-                index_of_point = None
-                start_str = line[index_start+len(start_sub):-1]
-                start_value = 0
-                
-                for index, sim in enumerate(start_str):
-                    if(ord(sim)>=48 and ord(sim)<=57):
-                        if(index_of_point):
-                            start_value += (ord(sim)-48)*(0.1**(index-index_of_point))
-                        else:
-                            start_value = start_value*10 + ord(sim)-48
-                
-                    if(ord(sim)==46):
-                        index_of_point = index
-                        
-            if(index_num_of_points != -1):
-                num_of_points_str = line[index_num_of_points+len(num_of_points_sub):-1]
-                num_of_points_value = 0
-                
-                for sim in num_of_points_str:
-                    if(ord(sim)>=48 and ord(sim)<=57):
-                        num_of_points_value = num_of_points_value*10 + ord(sim)-48
-                        
-
-
-def read_file_and_write(path_r: str, path_w: str, fn: str, wavelength_arr: int) -> None:
-    num_of_cols = wavelength_arr.shape[0]
-    counter = 0
-    
-    index_start = fn.find(".") + 1
-    index_stop = fn.rfind(".")
-    if(index_start==-1):
-        index_start = 0
-    if(index_stop==-1):
-        index_stop = len(fn) - 1
+    for string in strings:
+        index_delta = string.find(delta_sub)
+        index_start = string.find(start_sub)
+        index_num_of_points = string.find(num_of_points_sub)
         
+        if(index_delta!=-1 and len(delta_sub)<len(string)):
+            next_index = len(delta_sub)
+            delta_value = string[next_index:]
+            
+        if(index_start!=-1 and len(start_sub)<len(string)):
+            next_index = len(start_sub)
+            start_value = string[next_index:]
+    
+        if(index_num_of_points!=-1 and len(num_of_points_sub)<len(string)):
+            next_index = len(num_of_points_sub)
+            num_of_points_value = string[next_index:]
+            
+    if(not start_value or not delta_value or not num_of_points_value):
+        return None
+    
     try:
-        df_t = pd.read_csv(os.path.join(path_r, fn), encoding = 'cp1251', sep = '\t',
-                          skiprows=lambda x: collect_data_time(x), names=("time",),
-                          usecols=(0, ), header=None)
+        start_value = float(start_value.strip())
+        delta_value = float(delta_value.strip())
+        num_of_points_value = float(num_of_points_value.strip())
         
-        df_ch = pd.read_csv(os.path.join(path_r, fn), encoding = 'cp1251', sep = '\t',
-                          skiprows=lambda x: collect_data_channel(x), names=range(0, num_of_cols),
-                          header=None)
+    except Exception:
+        return None
+    
+    if(delta_value<=0 or num_of_points_value<=0 or start_value<=0):
+        return None
         
-        df1_tr = df_ch.transpose()
-        
-        if(df_ch.shape[0]!=df_t.shape[0]):
-            raise Exception
-        
-        for i in df1_tr.columns:
-            try:
-                arr1 = df1_tr[i]
-                arr2 = wavelength_arr
-                if(arr1.shape!=arr2.shape):
-                    raise Exception
-                
-                df2 = pd.DataFrame({'Wavelength': arr2, 'Channel 1': arr1})
-                
-                new_fn = fn[index_start: index_stop] + "__" + \
-                    str(df_t["time"][i]) + ".csv"
-                
-                df2.to_csv(os.path.join(path_w, new_fn), sep=";",
-                           encoding="cp1251", index=False)
+    stop_value = start_value + delta_value*num_of_points_value
+    
+    return np.arange(start_value, stop_value, delta_value)
 
-                print(f"\t\tФайл {i}: {new_fn} записан.")
-                counter += 1
-                
-            except Exception:
-                pass
+
+def read_file_and_write(path_r: str, path_w: str, fn: str, wavelength_arr: int,
+                        start_position: int, use_channels: set[int]) -> int:
+    
+    def find_num_of_channels(fr) -> set[int]:
+        old_position = fr.tell()
+        line = 1
+        channels = 0
+        
+        while(line):
+            line = fr.readline().strip()
+            channels += 1
+        
+        fr.seek(old_position)
+        
+        if(channels<3):
+            return {}
             
+        return set(range(channels - 2))
+    
+    def read_one_line(fr):
+        line = fr.readline()
+        
+        # End of file
+        if(not line):
+            return EOFError
+        
+        # Empty string (\n)
+        line = line.strip()
+        if(not line):
+            return None
+        
+        # Power on i-channel
+        if(line.count('\t')>10):
+            lst = line.split("\t")
+            arr = np.array([float(x) for x in lst])
+            return arr
+        
+        # Time
+        else:
+            return float(line)
+        
+    
+    def write_in_file(y_arr: np.ndarray, file_name: str):
+        with open(file_name, mode='w', newline='', encoding='utf-8') as csvfile:
+            writer = csv.writer(csvfile, delimiter=';')
+            
+            # имена столбцов
+            writer.writerow(['Wavelength', 'Channel 1'])
+            for a, b in zip(wavelength_arr, y_arr):
+                writer.writerow([a, b])
+                
+            print(f"\t\tФайл {counter}: {file_name} записан.")
+    
+    counter = 0
+    cur_time = 0
+    
+    try:
+        length_of_spectr = wavelength_arr.shape[0]
+        
+        with open(os.path.join(path_r, fn)) as fr:
+            fr.seek(start_position)
+            
+            channels = find_num_of_channels(fr)
+            
+            if(len(channels) < len(use_channels)):
+                raise Exception("Неправильный список каналов.")
+                
+            if(not use_channels.issubset(channels)):
+                raise Exception("Неправильный список каналов.")
+            
+            while(1):
+                out = read_one_line(fr)
+                
+                # End of file
+                if(isinstance(out, type(EOFError))):
+                    break
+                
+                # Empty string (\n)
+                elif(isinstance(out, type(None))):
+                    pass
+                
+                # Time
+                elif(isinstance(out, float)):
+                    cur_channel = 0
+                    if(out>=0 and cur_time<out):
+                        cur_time = out
+                    else:
+                        raise Exception("Неверное время")
+                        
+                # Power on i-channel
+                elif(isinstance(out, np.ndarray)):
+                    if('cur_channel' not in locals()):
+                        raise Exception("В одном из блоков с каналами нет"
+                                        "информации о времени.")
+                    if(cur_channel>max(channels)):
+                        raise Exception("В одном из блоков с каналами неверное"
+                                        "количество каналов.")
+                    if(out.shape[0]!=length_of_spectr):
+                        raise Exception("Размеры записываемых массивов не "
+                                        "совпадают.")
+        
+                    if(cur_channel in use_channels):    
+                        new_fn = "_".join([fn, f"{cur_time}",
+                                           f"{cur_channel}"]) + ".csv"
+                        name = os.path.join(path_w, new_fn)
+                        
+                        # write data on i-channel
+                        write_in_file(out, name)
+                        counter += 1
+                        
+                    cur_channel += 1
+                
+                
     except Exception as e:
-        print(e)
+        print(f"\t\t{e}")
     
     finally:
         return counter
-        
 
-def validate(path: str) -> bool:
-    if(not os.access(path=path, mode=os.R_OK)):
-        return False
-    
-    return True
-
-
-sys.argv.append(r"D:\испытания\проверка ФП датчиков\Термоиспытания датчик 1000")
-sys.argv.append(r"D:\испытания\проверка ФП датчиков\Термоиспытания датчик 1000\обработка")
 
 if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description='Описание программы')
-    parser.add_argument('path1', help='Путь к папке с txt файлами')
+    parser.add_argument('path1', help='Путь к папке с txt файлами', type=str)
     parser.add_argument('path2', help='Путь к папке, в которую запишутся '\
-                        'csv файлы.')
+                        'csv файлы.', type=str)
     parser.add_argument('-f', '--flag', dest='flag', help='Список с номерам'\
                         'и используемымых каналаов.\n Записать через запятую,'\
-                        ' Нумерация начинается с 0.')
+                        ' Нумерация начинается с 0.', type=str)
         
     args = parser.parse_args()
     
     input_path = args.path1
     output_path = args.path2
     
-    if(not os.access(args.path1, mode=os.R_OK)):
-        print(f"К файлу {input_path} нет доступа.")
+    if(not os.path.isdir(input_path)):
+        print(f"Директории {input_path} не существует")
         sys.exit(-2)
-    if(not os.access(sys.path2, mode=os.W_OK)):
-        print(f"К файлу {output_path} нет доступа.")
+        
+    if(not os.access(input_path, os.R_OK)):
+        print(f"К Директории {input_path} нет доступа.")
+        sys.exit(-3)
+        
+    if(not os.path.isdir(output_path)):
+        print(f"Директории {input_path} не существует")
+        sys.exit(-2)
+        
+    if(not os.access(output_path, os.W_OK)):
+        print(f"К Директории {output_path} нет доступа.")
         sys.exit(-3)
         
     if(args.flag):
         try:
-            channels = np.array((eval(args.flag)), dtype=int)
-            channels = np.unique(channels)
+            channels = {int(x.strip()) for x in args.flag.split(',') if x.strip()}
             
             if(len(channels)==0):
                 raise Exception
@@ -235,30 +252,49 @@ if __name__ == "__main__":
             sys.exit(-1)
         
     else:
-        channels = (0, )
+        channels = {0}
         
     print("\nПрограмма начала работу\n")
-    print("\tВыбранные каналы: ", *channels, sep=" ")
+    print("\tВыбранные каналы: ", *channels, sep=" ", end='\n\n\n')
+    
+    total = 0
     
     for f in os.listdir(input_path):
-        if f.endswith('.txt'):
-            ful_dir = os.path.join(input_path, f)
-            if(validate(ful_dir)):
-                print(f"\nФайл {f}")
-                wavelength = find_data_wavelength(ful_dir)
-                if(wavelength is not None):
-                    print(f"\nФайл {f} подходит\n\tОбработка...")
-                    output = read_file_and_write(input_path, output_path, f,
-                                                 wavelength)
-                    if(output):
-                        print(f"\n\tФайл {f} прочитан, {output} файлов записано в " \
-                              f"папку {output_path}\n")
-                    else:
-                        print(f"\tФайл {f} прочитан, но значения не записаны\n")
-                else:
-                    print(f"\tФайл {f} не прочитан\n")
-            else:
-                print(f"Файл {f} не подходит.\n")
-
-print("\nПрограмма закончила работу\n")
-sys.exit(0)
+        if not f.endswith('.txt'):
+            continue
+        else:
+            print(f"Текущий файл: {f}.\n")
+            
+        full_in_dir = os.path.join(input_path, f)
+        
+        if(not os.access(full_in_dir, os.R_OK)):
+            print(f"\nК файлу {f} нет доступа.")
+            continue
+            
+        print(f"\nФайл {f} обрабатывается.")
+        
+        result = get_header_and_data_position(full_in_dir)
+        if(result):
+            header, position = result
+        else:
+            print(f"\tФайл {f} не подходит\n")
+            continue
+            
+        wavelength = find_data_wavelength(header)
+        
+        if(wavelength is None):
+            print(f"\tФайл {f} не подходит\n")
+            continue
+            
+        output = read_file_and_write(input_path, output_path, f,
+                                     wavelength, position, channels)
+        if(output):
+            total += output
+            print(f"\n\tФайл {f} прочитан, {output} файлов записано в " \
+                  f"папку {output_path}\n")
+        else:
+            print(f"\tФайл {f} прочитан, но значения не записаны\n")
+            
+    print(f"\nВсего записано {total} файлов.\n"
+          "\nПрограмма закончила работу")
+    sys.exit(0)
